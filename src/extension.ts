@@ -197,9 +197,11 @@ async function findTerminalByPids(
 ): Promise<vscode.Terminal | undefined> {
   if (!ancestors || ancestors.length === 0) return undefined;
   const set = new Set(ancestors);
-  for (const t of vscode.window.terminals) {
-    const pid = await t.processId;
-    if (typeof pid === 'number' && set.has(pid)) return t;
+  const terms = vscode.window.terminals;
+  const pids = await Promise.all(terms.map((t) => t.processId));
+  for (let i = 0; i < terms.length; i++) {
+    const pid = pids[i];
+    if (typeof pid === 'number' && set.has(pid)) return terms[i];
   }
   return undefined;
 }

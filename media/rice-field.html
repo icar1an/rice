@@ -240,6 +240,14 @@ html, body {
 
   let farmers = [];
   let plants = [];
+  let zOrder = [];
+
+  function rebuildZOrder() {
+    zOrder = [
+      ...plants.map((p)  => ({ y: p.ly,               kind: 'plant',  ref: p })),
+      ...farmers.map((f) => ({ y: f.tileY + SPRITE_H, kind: 'farmer', ref: f })),
+    ].sort((a, b) => a.y - b.y);
+  }
 
   function applyLayout(incoming) {
     const n = incoming.length;
@@ -276,6 +284,7 @@ html, body {
       }
     });
     plants = out;
+    rebuildZOrder();
   }
 
   // ============ CLOUDS / STARS ============
@@ -707,16 +716,11 @@ html, body {
       if (!h) {
         h = document.createElement('div');
         h.className = 'rf-hit';
+        h.dataset.farmerId = f.id;
         overlay.appendChild(h);
         hitEls.set(f.id, h);
       }
       h.title = (f.plotId || f.name || 'claude') + (f.cwd ? ' — ' + f.cwd : '');
-      h.style.pointerEvents = 'auto';
-      h.style.cursor = 'pointer';
-      h.onclick = () => {
-        if (!vscodeApi) return;
-        vscodeApi.postMessage({ type: 'focusTerminal', id: f.id });
-      };
       const hx = f.tileX * PX;
       const hy = f.tileY * PX;
       const hw = SPRITE_W * PX;
@@ -732,6 +736,17 @@ html, body {
   // ============ VSCODE BRIDGE ============
   let vscodeApi = null;
   try { vscodeApi = acquireVsCodeApi(); } catch (e) { /* standalone */ }
+
+  // Delegated click — one listener for all hit overlays, avoids per-farmer
+  // closure allocations on every sync.
+  overlay.addEventListener('click', (ev) => {
+    const target = ev.target;
+    if (!(target instanceof Element)) return;
+    const hit = target.closest('.rf-hit');
+    if (!hit || !vscodeApi) return;
+    const id = hit.dataset.farmerId;
+    if (id) vscodeApi.postMessage({ type: 'focusTerminal', id });
+  });
 
   window.addEventListener('message', (ev) => {
     const m = ev.data;
@@ -752,20 +767,15 @@ html, body {
   let startTime = performance.now();
   function frame(now) {
     const t = now - startTime;
-    ctx.clearRect(0, 0, W, H);
-    drawSky(t);
-    drawMountains();
+    ctx.drawImage(bgLayer.canvas, 0, 0);
+    drawSkyDynamic(t);
     drawPaddies(t);
-    farmers.forEach(drawReflection);
-    const zOrder = [
-      ...plants.map(p  => ({ y: p.ly,               kind: 'plant',  ref: p })),
-      ...farmers.map(f => ({ y: f.tileY + SPRITE_H, kind: 'farmer', ref: f })),
-    ].sort((a, b) => a.y - b.y);
+    for (const f of farmers) drawReflection(f);
     for (const o of zOrder) {
       if (o.kind === 'plant') drawPlant(o.ref, t);
       else                    drawCreature(o.ref, t);
     }
-    drawForegroundEdge();
+    ctx.drawImage(fgLayer.canvas, 0, 0);
     requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
