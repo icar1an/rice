@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.0.3 — 2026-04-19
+
+- Updated icon to custom-authored mascot thumbnail
+
 ## 0.0.2 — 2026-04-19
 
 - New extension icon: the claude mascot in a sunset rice paddy with a `$` prompt bubble

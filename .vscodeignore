@@ -8,6 +8,5 @@ node_modules/**
 src/**
 tsconfig.json
 out/**/*.map
-media/icon.svg
 memory/**
 .claude-code/**
