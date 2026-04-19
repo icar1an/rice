@@ -1,0 +1,68 @@
+{
+  "name": "rice",
+  "displayName": "Rice Field",
+  "description": "Visualize your Claude Code sessions as pixel-art mascots working in a rice field.",
+  "version": "0.0.1",
+  "publisher": "spenserwu",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "claude",
+    "claude code",
+    "anthropic",
+    "ambient",
+    "pixel art",
+    "mascot",
+    "agent"
+  ],
+  "galleryBanner": {
+    "color": "#2a1a40",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/icar1an/rice.git"
+  },
+  "bugs": {
+    "url": "https://github.com/icar1an/rice/issues"
+  },
+  "homepage": "https://github.com/icar1an/rice#readme",
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "commands": [
+      {
+        "command": "rice.openField",
+        "title": "Rice: Open Field"
+      },
+      {
+        "command": "rice.installHooks",
+        "title": "Rice: Install Hooks"
+      },
+      {
+        "command": "rice.uninstallHooks",
+        "title": "Rice: Uninstall Hooks"
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.9.1",
+    "typescript": "^5.3.0"
+  }
+}

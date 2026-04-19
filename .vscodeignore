@@ -1,0 +1,14 @@
+.vscode/**
+.vscode-test/**
+.claude/**
+.gitignore
+*.vsix
+node_modules/**
+src/**
+tsconfig.json
+out/**/*.map
+claude_rice_field.html
+preview.html
+media/icon.svg
+memory/**
+.claude-code/**

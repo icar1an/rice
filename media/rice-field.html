@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src {{cspSource}} 'unsafe-inline'; script-src 'nonce-{{nonce}}'; img-src {{cspSource}} data:;">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Rice Field</title>
+<style>
+:root {
+  --border-radius-lg: 8px;
+}
+html, body {
+  margin: 0;
+  padding: 16px;
+  background: var(--vscode-editor-background, #0f0f10);
+  color: var(--vscode-editor-foreground, #ddd);
+  font-family: var(--vscode-font-family, 'Courier New', monospace);
+}
+.rf-wrap {
+  position: relative;
+  width: 100%;
+  max-width: 680px;
+  margin: 0 auto;
+  font-family: 'Courier New', monospace;
+}
+.rf-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  border-radius: var(--border-radius-lg);
+  background: #1a1a1a;
+}
+.rf-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.rf-bubble {
+  position: absolute;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: #2a1a0d;
+  background: #fefbf0;
+  border: 2px solid #2a1a0d;
+  padding: 3px 7px;
+  border-radius: 0;
+  white-space: nowrap;
+  transform: translate(-50%, -100%);
+  box-shadow: 2px 2px 0 #2a1a0d;
+  max-width: 220px;
+  line-height: 1.2;
+}
+.rf-bubble.rf-waiting {
+  background: #fff2c8;
+  border-color: #8a6020;
+  box-shadow: 2px 2px 0 #8a6020;
+}
+.rf-bubble.rf-done {
+  background: #e8f8d8;
+  border-color: #2a5a2a;
+  box-shadow: 2px 2px 0 #2a5a2a;
+}
+.rf-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: -7px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-top: 7px solid currentColor;
+  color: #2a1a0d;
+}
+.rf-bubble.rf-waiting::after { color: #8a6020; }
+.rf-bubble.rf-done::after    { color: #2a5a2a; }
+.rf-bubble::before {
+  content: '';
+  position: absolute;
+  bottom: -4px;
+  left: 50%;
+  transform: translateX(-50%) translateY(1px);
+  width: 0; height: 0;
+  border-left: 3px solid transparent;
+  border-right: 3px solid transparent;
+  border-top: 4px solid #fefbf0;
+  z-index: 1;
+}
+.rf-bubble.rf-waiting::before { border-top-color: #fff2c8; }
+.rf-bubble.rf-done::before    { border-top-color: #e8f8d8; }
+.rf-hit {
+  position: absolute;
+  pointer-events: auto;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 120ms, outline-color 120ms;
+  outline: 1px dashed transparent;
+}
+.rf-hit:hover {
+  background: rgba(255, 255, 255, 0.08);
+  outline-color: rgba(255, 255, 255, 0.4);
+}
+</style>
+</head>
+<body>
+<div class="rf-wrap">
+  <canvas id="rf-field" class="rf-canvas" width="680" height="440"></canvas>
+  <div class="rf-overlay" id="rf-overlay"></div>
+</div>
+<script nonce="{{nonce}}">
+(() => {
+  const canvas = document.getElementById('rf-field');
+  const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
+  const overlay = document.getElementById('rf-overlay');
+  const W = 680, H = 440;
+  const PX = 4;
+  const LOG_W = W / PX;   // 170
+  const LOG_H = H / PX;   // 110
+  const TAU = Math.PI * 2;
+  const smoothStep = (a, b, v) => {
+    const t = Math.max(0, Math.min(1, (v - a) / (b - a)));
+    return t * t * (3 - 2 * t);
+  };
+
+  // ============ PALETTE ============
+  const C = {
+    creat: '#d97757', eye: '#1a0a04',
+    rice2: '#b0c94c', rice3: '#d8c050', rice4: '#e8d060',
+    gold: '#f4d062', goldDark: '#c8a040',
+    cloud: '#f8f0e8', pagRoof: '#a83030',
+    sky1: '#2a1a40', sky2: '#4a2450', sky3: '#7a2e52',
+    sky4: '#b85040', sky5: '#e08050', sky6: '#f0a870',
+    sunDisc: '#f8e090', sunHalo: '#f4b060', star: '#fff2c8',
+    mtn1: '#1a1428', mtn2: '#2a1f38', pagSide: '#3a2030',
+    water1: '#395468', water2: '#4a6478', water3: '#283f50',
+    waterShine: '#b8d0d8',
+    bank: '#4a3020', bankLit: '#6a4530', bankShadow: '#24160a',
+    pD: '#243820', pM: '#456b2e', pL: '#7ea848',
+    gD: '#a07828', gM: '#d4a842', gL: '#f4d268',
+    bird: '#0e0810', cloudWarm: '#e8a888', cloudHi: '#f8c8a8',
+  };
+  const TOOL = {
+    blade1: '#e4e4ec', blade2: '#b8b8c4', blade3: '#808088',
+    checkHi: '#a8f4b0', checkMid: '#5cd868', checkSh: '#143614',
+    dust1: '#f2e8d8', dust2: '#a88858',
+  };
+
+  const hash = (x, y) => {
+    let h = (x * 374761393 + y * 668265263) | 0;
+    h = (h ^ (h >>> 13)) * 1274126177;
+    return (h ^ (h >>> 16)) >>> 0;
+  };
+  const rect = (x, y, w, h, color) => {
+    ctx.fillStyle = color;
+    ctx.fillRect(Math.floor(x*PX), Math.floor(y*PX), Math.max(1, w*PX), Math.max(1, h*PX));
+  };
+
+  // ============ FARMER SPRITE ============
+  const SPRITE_ASCII = [
+    '......##################################......',
+    '......##################################......',
+    '......##################################......',
+    '......##################################......',
+    '......#####EEE##################EEE#####......',
+    '......#####EEE##################EEE#####......',
+    '......#####EEE##################EEE#####......',
+    '......#####EEE##################EEE#####......',
+    '##############################################',
+    '##############################################',
+    '##############################################',
+    '##############################################',
+    '......##################################......',
+    '......##################################......',
+    '......##################################......',
+    '......##################################......',
+    '.........###...###..........###...###.........',
+    '.........###...###..........###...###.........',
+    '.........###...###..........###...###.........',
+    '.........###...###..........###...###.........',
+  ];
+  const SPRITE_LEGEND = { '#': C.creat, 'E': C.eye };
+  const SPRITE_W = SPRITE_ASCII[0].length;
+  const SPRITE_H = SPRITE_ASCII.length;
+  const spritePixels = [];
+  SPRITE_ASCII.forEach((row, dy) => {
+    for (let dx = 0; dx < row.length; dx++) {
+      const color = SPRITE_LEGEND[row[dx]];
+      if (color) spritePixels.push({ dx, dy, color });
+    }
+  });
+
+  // ============ PLANT SPRITES (3 growth stages) ============
+  const PLANT_LEGEND = { d: C.pD, m: C.pM, l: C.pL, D: C.gD, G: C.gM, L: C.gL };
+  const PLANT_ART = [
+    ['.l.', '.m.', '.m.', 'dmd'],
+    ['.l.l.', 'lmlm.', '.dmd.', '..m..', '..m..', '..d..'],
+    ['L.L.L', '.GLG.', 'DGlGD', '.DmD.', '..m..', '..m..', '..m..', '..d..'],
+  ];
+  const PLANTS = PLANT_ART.map(rows => {
+    const pixels = [];
+    rows.forEach((row, dy) => {
+      for (let dx = 0; dx < row.length; dx++) {
+        const c = PLANT_LEGEND[row[dx]];
+        if (c) pixels.push({ dx, dy, color: c });
+      }
+    });
+    return { w: rows[0].length, h: rows.length, pixels };
+  });
+
+  // ============ SCENE LAYOUT ============
+  const PADDIES = [
+    { y: 32, h: 4  },
+    { y: 40, h: 8  },
+    { y: 60, h: 12 },
+    { y: 84, h: 14 },
+  ];
+
+  // Fixed slot presets per farmer count so 1..8 farmers look composed.
+  const LAYOUTS = {
+    1: [[62, 50, 2]],
+    2: [[22, 50, 2], [104, 50, 2]],
+    3: [[22, 26, 1], [104, 26, 1], [62, 50, 2]],
+    4: [[22, 26, 1], [104, 26, 1], [22, 50, 2], [104, 50, 2]],
+    5: [[22, 26, 1], [104, 26, 1], [5, 50, 2], [119, 50, 2], [62, 76, 3]],
+    6: [[22, 26, 1], [104, 26, 1], [5, 50, 2], [119, 50, 2], [30, 76, 3], [94, 76, 3]],
+    7: [[10, 26, 1], [62, 26, 1], [114, 26, 1], [5, 50, 2], [119, 50, 2], [30, 76, 3], [94, 76, 3]],
+    8: [[10, 26, 1], [62, 26, 1], [114, 26, 1], [5, 50, 2], [62, 50, 2], [119, 50, 2], [30, 76, 3], [94, 76, 3]],
+  };
+
+  let farmers = [];
+  let plants = [];
+
+  function applyLayout(incoming) {
+    const n = incoming.length;
+    if (n === 0) return [];
+    const preset = LAYOUTS[Math.min(n, 8)] || LAYOUTS[8];
+    return incoming.map((f, i) => {
+      const slot = preset[i % preset.length];
+      return Object.assign({}, f, { tileX: slot[0], tileY: slot[1], paddy: slot[2] });
+    });
+  }
+
+  // ============ PROCEDURAL PLANTS ============
+  function seedPlants() {
+    const out = [];
+    const nearFarmerInPaddy = (lx, pi) => farmers.some(f =>
+      f.paddy === pi && lx > f.tileX - 1 && lx < f.tileX + SPRITE_W + 1
+    );
+    PADDIES.forEach((p, pi) => {
+      const baseY = p.y + p.h - 1;
+      const spacing = Math.max(3, 7 - pi);
+      for (let x = 1; x < LOG_W - 3; x += spacing) {
+        const jitter = (hash(x, p.y) % 5) - 2;
+        const lx = x + jitter;
+        const ly = baseY + (hash(x * 3, p.y) % 2);
+        if (pi >= 1 && nearFarmerInPaddy(lx, pi)) continue;
+        const h = hash(lx, ly);
+        const stage = (pi === 0) ? 0 : (pi === 1 ? (h % 2) : 1 + (h % 2));
+        out.push({
+          lx, ly, paddy: pi, stage,
+          phase: ((h >>> 8) & 0xff) / 255,
+          cycling: ((h >>> 16) & 0xff) < 80,
+          tone: ((h >>> 20) & 1),
+        });
+      }
+    });
+    plants = out;
+  }
+
+  // ============ CLOUDS / STARS ============
+  const clouds = [
+    { x0: 10,  y: 6,  w: 16, speed: 0.006 },
+    { x0: 80,  y: 10, w: 12, speed: 0.004 },
+    { x0: 140, y: 4,  w: 20, speed: 0.008 },
+  ];
+  const stars = Array.from({ length: 22 }, (_, i) => ({
+    x: (hash(i + 1, 7) % LOG_W),
+    y: (hash(i + 1, 13) % 18),
+    phase: (hash(i + 1, 19) % 100) / 100,
+  }));
+
+  // ============ SCENE DRAWERS ============
+  function drawSky(t) {
+    const bands = [
+      [0, 4, C.sky1], [4, 4, C.sky2], [8, 4, C.sky3],
+      [12, 4, C.sky4], [16, 4, C.sky5], [20, 4, C.sky6],
+    ];
+    for (const [y, h, c] of bands) rect(0, y, LOG_W, h, c);
+    for (const s of stars) {
+      const tw = (Math.sin(t / 450 + s.phase * TAU) + 1) / 2;
+      if (tw > 0.55) rect(s.x, s.y, 1, 1, C.star);
+    }
+    const sx = 138, sy = 17;
+    rect(sx - 4, sy, 1, 1, C.sunHalo); rect(sx + 4, sy, 1, 1, C.sunHalo);
+    rect(sx, sy - 4, 1, 1, C.sunHalo); rect(sx, sy + 4, 1, 1, C.sunHalo);
+    rect(sx - 2, sy - 2, 5, 5, C.sunHalo);
+    rect(sx - 1, sy - 2, 3, 1, C.sunDisc);
+    rect(sx - 2, sy - 1, 5, 3, C.sunDisc);
+    rect(sx - 1, sy + 2, 3, 1, C.sunDisc);
+    for (const cl of clouds) {
+      const dx = Math.floor((cl.x0 + cl.speed * t) % (LOG_W + cl.w + 20)) - cl.w;
+      rect(dx + 1, cl.y,     cl.w - 2, 1, C.cloudWarm);
+      rect(dx,     cl.y + 1, cl.w,     1, C.cloudWarm);
+      rect(dx + 2, cl.y - 1, cl.w - 5, 1, C.cloudHi);
+      rect(dx + 3, cl.y + 2, cl.w - 7, 1, C.cloudHi);
+    }
+    const drawBird = (bx, by) => {
+      if (bx < -3 || bx > LOG_W + 3) return;
+      rect(bx - 1, by,     1, 1, C.bird);
+      rect(bx,     by - 1, 1, 1, C.bird);
+      rect(bx + 1, by,     1, 1, C.bird);
+      rect(bx - 2, by + 1, 1, 1, C.bird);
+      rect(bx + 2, by + 1, 1, 1, C.bird);
+    };
+    const t1 = (t / 60) % (LOG_W + 30);
+    drawBird(Math.floor(LOG_W + 15 - t1), 12);
+    const t2 = ((t + 4000) / 55) % (LOG_W + 30);
+    drawBird(Math.floor(LOG_W + 15 - t2), 9);
+  }
+
+  function drawMountains() {
+    for (let x = 0; x < LOG_W; x++) {
+      const h = 5 + Math.round(Math.sin(x * 0.09) * 2) + Math.round(Math.cos(x * 0.23) * 2);
+      rect(x, 30 - h, 1, h, C.mtn1);
+    }
+    for (let x = 0; x < LOG_W; x++) {
+      const h = 3 + Math.round(Math.sin(x * 0.17 + 1.5) * 2);
+      rect(x, 31 - h, 1, h, C.mtn2);
+    }
+    const pagX = 34, pagY = 24;
+    rect(pagX + 2, pagY - 3, 2, 1, C.pagRoof);
+    rect(pagX + 1, pagY - 2, 4, 1, C.pagRoof);
+    rect(pagX,     pagY - 1, 6, 1, C.pagRoof);
+    rect(pagX + 2, pagY,     2, 1, C.pagSide);
+    rect(pagX + 1, pagY + 1, 4, 1, C.pagRoof);
+    rect(pagX + 2, pagY + 2, 2, 2, C.pagSide);
+  }
+
+  function drawPaddies(t) {
+    for (let pi = 0; pi < PADDIES.length; pi++) {
+      const p = PADDIES[pi];
+      rect(0, p.y,         LOG_W, 1,         C.water2);
+      rect(0, p.y + 1,     LOG_W, p.h - 2,   C.water1);
+      rect(0, p.y + p.h-1, LOG_W, 1,         C.water3);
+      rect(0, p.y - 2, LOG_W, 1, C.bankShadow);
+      rect(0, p.y - 1, LOG_W, 1, C.bank);
+      const period = 2400;
+      for (let x = 2; x < LOG_W - 2; x += 4) {
+        const seed = hash(x, p.y);
+        const phase = (seed % 1000) / 1000;
+        const onCycle = ((t / period) + phase) % 1;
+        if (onCycle < 0.08) {
+          const sy = p.y + 1 + ((seed >> 8) % Math.max(1, p.h - 2));
+          rect(x, sy, 2, 1, C.waterShine);
+        }
+      }
+    }
+  }
+
+  function drawReflection(f) {
+    const by = f.tileY + SPRITE_H;
+    ctx.fillStyle = 'rgba(10,20,30,0.35)';
+    ctx.fillRect(f.tileX * PX, by * PX, SPRITE_W * PX, PX);
+    for (let dx = 1; dx < SPRITE_W - 1; dx += 3) {
+      rect(f.tileX + dx, by + 1, 2, 1, C.water3);
+    }
+  }
+
+  function drawPlant(p, t) {
+    let stage = p.stage;
+    if (p.cycling) {
+      const c = ((t / 5200) + p.phase) % 1;
+      stage = c < 0.34 ? 0 : c < 0.7 ? 1 : 2;
+    }
+    const sprite = PLANTS[stage];
+    const sway = Math.round(Math.sin(t / 720 + p.phase * 6.283) * 1);
+    const px0 = p.lx - Math.floor(sprite.w / 2) + sway;
+    const py0 = p.ly - sprite.h + 1;
+    for (const px of sprite.pixels) {
+      let color = px.color;
+      if (p.tone && color === C.pM) color = C.pL;
+      rect(px0 + px.dx, py0 + px.dy, 1, 1, color);
+    }
+  }
+
+  // ============ FARMER ANIMATIONS (seamless loops) ============
+  function drawCreature(f, t) {
+    const x = f.tileX;
+    const baseY = f.tileY;
+    const cx = Math.floor(SPRITE_W / 2);
+    let yOff = 0, xOff = 0;
+    if (f.state === 'planting') {
+      const p = (t / 2400) % 1;
+      yOff = Math.round(Math.max(0, -Math.cos(p * TAU)) * 2);
+    } else if (f.state === 'harvesting') {
+      const p = (t / 1200) % 1;
+      yOff = Math.round(Math.sin(p * TAU * 2) * 0.5);
+      xOff = Math.round(Math.sin(p * TAU) * 0.5);
+    } else if (f.state === 'walking') {
+      const p = (t / 1100) % 1;
+      yOff = -Math.round(Math.abs(Math.sin(p * TAU * 2)) * 1);
+      xOff = Math.sin(p * TAU) < 0 ? -1 : 0;
+    } else if (f.state === 'thinking') {
+      yOff = Math.round(Math.sin(t / 900 * TAU) * 0.5);
+    } else if (f.state === 'waiting') {
+      yOff = Math.round(Math.sin(t / 600 * TAU) * 1);
+    } else if (f.state === 'done') {
+      yOff = Math.round(Math.sin(t / 650 * TAU) * 1);
+    } else {
+      yOff = Math.round(Math.sin(t / 2200 * TAU) * 0.5);
+      xOff = Math.round(Math.sin(t / 3100 * TAU) * 0.5);
+    }
+    const y = baseY + yOff;
+
+    ctx.fillStyle = 'rgba(0,0,0,0.22)';
+    ctx.fillRect(x * PX, (baseY + SPRITE_H) * PX, SPRITE_W * PX, PX);
+
+    if (f.state === 'waiting') drawGlowAura(f, t, C.sunDisc, 1400, 6);
+    if (f.state === 'done')    drawGlowAura(f, t, C.gL,      1800, 8);
+
+    for (const pp of spritePixels) {
+      rect(x + xOff + pp.dx, y + pp.dy, 1, 1, pp.color);
+    }
+
+    if (f.state === 'idle') {
+      const bp = (t / 3800) % 1;
+      if (bp < 0.06) {
+        for (const pp of spritePixels) {
+          if (pp.color === C.eye) rect(x + xOff + pp.dx, y + pp.dy, 1, 1, C.creat);
+        }
+      }
+    }
+
+    if (f.state === 'planting')   drawPlantingFx(x, y, t);
+    if (f.state === 'harvesting') drawHarvestingFx(x, y, t);
+    if (f.state === 'walking')    drawWalkingFx(x, baseY, y, t);
+    if (f.state === 'thinking')   drawThinkingFx(x, y, t, cx);
+    if (f.state === 'waiting')    drawWaitingFx(x, y, t, cx);
+    if (f.state === 'done')       drawDoneFx(x, y, t, cx);
+
+    if (f.state === 'planting' || f.state === 'harvesting' || f.state === 'walking') {
+      drawFootRipples(x, baseY, t);
+    }
+  }
+
+  function drawGlowAura(f, t, color, period, pad) {
+    const pulse = (Math.sin((t / period) * TAU) + 1) / 2;
+    ctx.globalAlpha = 0.08 + 0.14 * pulse;
+    ctx.fillStyle = color;
+    ctx.fillRect(
+      (f.tileX - pad) * PX, (f.tileY - pad) * PX,
+      (SPRITE_W + pad * 2) * PX, (SPRITE_H + pad * 2) * PX
+    );
+    ctx.globalAlpha = 1;
+  }
+
+  function drawPlantingFx(x, y, t) {
+    const p = (t / 2400) % 1;
+    if (p < 0.18) {
+      const f = p / 0.18;
+      const sy = y + 9 + Math.round(f * (SPRITE_H - 10));
+      rect(x + SPRITE_W + 1, sy, 1, 1, C.bank);
+      rect(x + SPRITE_W + 1, sy - 1, 1, 1, C.bankLit);
+    }
+    const sproutX = x + SPRITE_W + 1;
+    const sproutBaseY = y + SPRITE_H - 1;
+    let stage = -1;
+    if (p >= 0.22 && p < 0.46)      stage = 0;
+    else if (p >= 0.46 && p < 0.72) stage = 1;
+    else if (p >= 0.72 && p < 0.92) stage = 2;
+    if (stage >= 0) {
+      const sprite = PLANTS[stage];
+      const sway = Math.round(Math.sin(t / 500 * TAU) * 1);
+      const px0 = sproutX - Math.floor(sprite.w / 2) + sway;
+      const py0 = sproutBaseY - sprite.h + 1;
+      for (const px of sprite.pixels) rect(px0 + px.dx, py0 + px.dy, 1, 1, px.color);
+    }
+  }
+
+  function drawHarvestingFx(x, y, t) {
+    const p = (t / 1200) % 1;
+    const armY = y + 8;
+    const plantX = x + SPRITE_W + 3;
+    const plantBaseY = y + SPRITE_H - 1;
+    const sprite = PLANTS[2];
+    const sway = Math.round(Math.sin(t / 600 * TAU + 1.5) * 1);
+    const px0 = plantX - Math.floor(sprite.w / 2) + sway;
+    const py0 = plantBaseY - sprite.h + 1;
+    for (const px of sprite.pixels) rect(px0 + px.dx, py0 + px.dy, 1, 1, px.color);
+    const angle = Math.sin(p * TAU) * 1.1;
+    const arcR = 6;
+    const sX = x + SPRITE_W + Math.round(Math.cos(angle - Math.PI/2) * arcR);
+    const sY = armY + Math.round(Math.sin(angle - Math.PI/2) * arcR) + 4;
+    rect(sX,     sY,     1, 1, TOOL.blade2);
+    rect(sX + 1, sY,     1, 1, TOOL.blade1);
+    rect(sX - 1, sY + 1, 1, 1, TOOL.blade3);
+    rect(sX,     sY + 1, 1, 1, TOOL.blade2);
+    rect(sX + 1, sY + 2, 1, 1, C.bank);
+    rect(sX + 2, sY + 3, 1, 1, C.bank);
+    for (const phi of [0, 0.45]) {
+      const gp = ((t / 900) + phi) % 1;
+      if (gp < 0.55) {
+        const arc = Math.sin(gp * Math.PI);
+        const gx = x + SPRITE_W + Math.round(gp * 9);
+        const gy = armY - Math.round(arc * 6);
+        rect(gx,     gy,     1, 1, C.gL);
+        rect(gx + 1, gy + 1, 1, 1, C.gM);
+      }
+    }
+  }
+
+  function drawWalkingFx(x, baseY, y, t) {
+    const hoeX = x + SPRITE_W - 3;
+    const hoeTop = y - 6;
+    for (let i = 0; i < 10; i++) {
+      rect(hoeX,     hoeTop + i, 1, 1, C.bankLit);
+      rect(hoeX + 1, hoeTop + i, 1, 1, C.bank);
+    }
+    rect(hoeX - 2, hoeTop - 1, 5, 1, C.bankShadow);
+    rect(hoeX - 2, hoeTop,     5, 1, C.bank);
+    rect(hoeX - 1, hoeTop + 1, 3, 1, C.bankShadow);
+    for (const phi of [0, 0.5]) {
+      const dp = ((t / 900) + phi) % 1;
+      const alive = smoothStep(0.02, 0.15, dp) * (1 - smoothStep(0.55, 0.8, dp));
+      if (alive > 0.35) {
+        const dx = -2 - Math.round(dp * 5);
+        const dy = -Math.round(Math.sin(dp * Math.PI) * 2);
+        rect(x + dx,     baseY + SPRITE_H + dy,     1, 1, alive > 0.75 ? TOOL.dust1 : TOOL.dust2);
+        if (alive > 0.8) rect(x + dx + 1, baseY + SPRITE_H + dy, 1, 1, TOOL.dust1);
+      }
+    }
+  }
+
+  function drawThinkingFx(x, y, t, cx) {
+    const p = (t / 1500) % 1;
+    for (let i = 0; i < 3; i++) {
+      const onset = 0.08 + i * 0.2;
+      const alpha = smoothStep(onset, onset + 0.08, p) * (1 - smoothStep(0.82, 1, p));
+      if (alpha > 0.45) rect(x + cx - 2 + i * 2, y - 3, 1, 1, C.eye);
+    }
+  }
+
+  function drawWaitingFx(x, y, t, cx) {
+    const bounce = Math.abs(Math.sin(t / 700 * Math.PI));
+    const qy = y - 12 - Math.round(bounce * 3);
+    const qx0 = x + cx - 2;
+    const qm = [
+      '.LLL.', 'Lo.oL', '..oL.', '.oLo.', '.oL..', '.....', '.oL..',
+    ];
+    for (let dy = 0; dy < qm.length; dy++) {
+      for (let dx = 0; dx < qm[dy].length; dx++) {
+        if (qm[dy][dx] === 'o') rect(qx0 + dx, qy + dy, 1, 1, C.goldDark);
+      }
+    }
+    for (let dy = 0; dy < qm.length; dy++) {
+      for (let dx = 0; dx < qm[dy].length; dx++) {
+        if (qm[dy][dx] === 'L') rect(qx0 + dx, qy + dy, 1, 1, C.sunDisc);
+      }
+    }
+  }
+
+  function drawDoneFx(x, y, t, cx) {
+    const rotSpeed = 1 / 1600;
+    const numSparks = 6;
+    const rx = SPRITE_W / 2 + 3;
+    const ry = 8;
+    for (let i = 0; i < numSparks; i++) {
+      const th = (t * rotSpeed + i / numSparks) * TAU;
+      const sx = x + cx + Math.round(Math.cos(th) * rx);
+      const sy = y + Math.floor(SPRITE_H / 2) + Math.round(Math.sin(th) * ry);
+      const inFront = Math.sin(th);
+      const color = inFront > 0 ? C.gL : C.gM;
+      rect(sx, sy, 1, 1, color);
+      if (inFront > 0.55) {
+        rect(sx - 1, sy,     1, 1, color);
+        rect(sx + 1, sy,     1, 1, color);
+        rect(sx,     sy - 1, 1, 1, color);
+        rect(sx,     sy + 1, 1, 1, color);
+      }
+    }
+    const bob = Math.round(Math.sin(t / 900 * TAU) * 1);
+    const cy  = y - 9 + bob;
+    const cx0 = x + cx - 2;
+    const check = [
+      '....K', '...Kk', '..Kk.', 'k.Kk.', 'KkK..', '.K...',
+    ];
+    for (let dy = 0; dy < check.length; dy++) {
+      for (let dx = 0; dx < check[dy].length; dx++) {
+        if (check[dy][dx] !== '.') rect(cx0 + dx + 1, cy + dy + 1, 1, 1, TOOL.checkSh);
+      }
+    }
+    for (let dy = 0; dy < check.length; dy++) {
+      for (let dx = 0; dx < check[dy].length; dx++) {
+        const c = check[dy][dx];
+        if (c === 'k') rect(cx0 + dx, cy + dy, 1, 1, TOOL.checkMid);
+        if (c === 'K') rect(cx0 + dx, cy + dy, 1, 1, TOOL.checkHi);
+      }
+    }
+  }
+
+  function drawFootRipples(x, baseY, t) {
+    const ry = baseY + SPRITE_H - 1;
+    for (const phi of [0, 0.5]) {
+      const rp = ((t / 900) + phi) % 1;
+      const w  = 1 + Math.round(rp * 6);
+      const alpha = 1 - rp;
+      if (alpha > 0.25) {
+        ctx.globalAlpha = alpha * 0.9;
+        rect(x + 6  - Math.floor(w / 2), ry + 1 + Math.round(rp * 2), w, 1, C.waterShine);
+        rect(x + 34 - Math.floor(w / 2), ry + 1 + Math.round(rp * 2), w, 1, C.waterShine);
+        ctx.globalAlpha = 1;
+      }
+    }
+  }
+
+  function drawForegroundEdge() {
+    rect(0, 98,  LOG_W, 4, C.bank);
+    rect(0, 102, LOG_W, 8, C.bankShadow);
+    for (let x = 0; x < LOG_W; x += 3) {
+      const h = hash(x, 99);
+      if (h % 3 === 0) rect(x, 98, 1, 1, C.bankLit);
+      if (h % 5 === 0) rect(x + 1, 101, 1, 1, C.bankLit);
+    }
+  }
+
+  // ============ EMPTY STATE CARD ============
+  const emptyEl = document.createElement('div');
+  emptyEl.style.cssText = 'position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);background:#fefbf0;border:2px solid #2a1a0d;color:#2a1a0d;padding:6px 10px;font-family:\'Courier New\',monospace;font-size:11px;box-shadow:2px 2px 0 #2a1a0d;text-align:center;max-width:280px;line-height:1.3;pointer-events:none;';
+  emptyEl.appendChild(document.createTextNode('no claudes in the field.'));
+  emptyEl.appendChild(document.createElement('br'));
+  emptyEl.appendChild(document.createTextNode('run '));
+  const emptyBold = document.createElement('b');
+  emptyBold.textContent = 'Rice: Install Hooks';
+  emptyEl.appendChild(emptyBold);
+  emptyEl.appendChild(document.createTextNode(' and start a claude session.'));
+  overlay.appendChild(emptyEl);
+
+  // ============ DYNAMIC BUBBLES ============
+  const bubbleEls = new Map();
+  const hitEls = new Map();
+  function syncOverlay() {
+    const ids = new Set(farmers.map((f) => f.id));
+    for (const [id, el] of bubbleEls) {
+      if (!ids.has(id)) { el.remove(); bubbleEls.delete(id); }
+    }
+    for (const [id, el] of hitEls) {
+      if (!ids.has(id)) { el.remove(); hitEls.delete(id); }
+    }
+    farmers.forEach((f) => {
+      let b = bubbleEls.get(f.id);
+      if (!b) {
+        b = document.createElement('div');
+        b.className = 'rf-bubble';
+        overlay.appendChild(b);
+        bubbleEls.set(f.id, b);
+      }
+      b.textContent = f.msg || '';
+      b.className = 'rf-bubble' + (f.state === 'waiting' ? ' rf-waiting' : (f.state === 'done' ? ' rf-done' : ''));
+      const bx = (f.tileX + SPRITE_W / 2) * PX;
+      const by = (f.tileY - 5) * PX;
+      b.style.left = (bx / W) * 100 + '%';
+      b.style.top  = (by / H) * 100 + '%';
+      b.style.display = f.msg ? '' : 'none';
+
+      let h = hitEls.get(f.id);
+      if (!h) {
+        h = document.createElement('div');
+        h.className = 'rf-hit';
+        overlay.appendChild(h);
+        hitEls.set(f.id, h);
+      }
+      h.title = (f.plotId || f.name || 'claude') + (f.cwd ? ' — ' + f.cwd : '');
+      h.style.pointerEvents = 'auto';
+      h.style.cursor = 'pointer';
+      h.onclick = () => {
+        if (!vscodeApi) return;
+        vscodeApi.postMessage({ type: 'focusTerminal', id: f.id });
+      };
+      const hx = f.tileX * PX;
+      const hy = f.tileY * PX;
+      const hw = SPRITE_W * PX;
+      const hh = SPRITE_H * PX;
+      h.style.left   = (hx / W) * 100 + '%';
+      h.style.top    = (hy / H) * 100 + '%';
+      h.style.width  = (hw / W) * 100 + '%';
+      h.style.height = (hh / H) * 100 + '%';
+    });
+    emptyEl.style.display = farmers.length === 0 ? '' : 'none';
+  }
+
+  // ============ VSCODE BRIDGE ============
+  let vscodeApi = null;
+  try { vscodeApi = acquireVsCodeApi(); } catch (e) { /* standalone */ }
+
+  window.addEventListener('message', (ev) => {
+    const m = ev.data;
+    if (m && m.type === 'farmers') {
+      farmers = applyLayout(Array.isArray(m.farmers) ? m.farmers : []);
+      seedPlants();
+      syncOverlay();
+    }
+  });
+
+  if (vscodeApi) vscodeApi.postMessage({ type: 'ready' });
+
+  // Seed plants once for the empty scene (looks nicer than bare paddies).
+  seedPlants();
+  syncOverlay();
+
+  // ============ MAIN LOOP ============
+  let startTime = performance.now();
+  function frame(now) {
+    const t = now - startTime;
+    ctx.clearRect(0, 0, W, H);
+    drawSky(t);
+    drawMountains();
+    drawPaddies(t);
+    farmers.forEach(drawReflection);
+    const zOrder = [
+      ...plants.map(p  => ({ y: p.ly,               kind: 'plant',  ref: p })),
+      ...farmers.map(f => ({ y: f.tileY + SPRITE_H, kind: 'farmer', ref: f })),
+    ].sort((a, b) => a.y - b.y);
+    for (const o of zOrder) {
+      if (o.kind === 'plant') drawPlant(o.ref, t);
+      else                    drawCreature(o.ref, t);
+    }
+    drawForegroundEdge();
+    requestAnimationFrame(frame);
+  }
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
