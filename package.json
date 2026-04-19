@@ -3,7 +3,7 @@
   "displayName": "Rice Field",
   "description": "Visualize your Claude Code sessions as pixel-art mascots working in a rice field.",
   "version": "0.0.1",
-  "publisher": "spenserwu",
+  "publisher": "UnseriousVentures",
   "license": "MIT",
   "icon": "media/icon.png",
   "engines": {

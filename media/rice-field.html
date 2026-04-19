@@ -153,9 +153,17 @@ html, body {
     h = (h ^ (h >>> 13)) * 1274126177;
     return (h ^ (h >>> 16)) >>> 0;
   };
-  const rect = (x, y, w, h, color) => {
-    ctx.fillStyle = color;
-    ctx.fillRect(Math.floor(x*PX), Math.floor(y*PX), Math.max(1, w*PX), Math.max(1, h*PX));
+  const makePainter = (target) => (x, y, w, h, color) => {
+    target.fillStyle = color;
+    target.fillRect(x * PX, y * PX, w * PX, h * PX);
+  };
+  const rect = makePainter(ctx);
+  const makeLayer = (w, h) => {
+    const c = document.createElement('canvas');
+    c.width = w; c.height = h;
+    const cx = c.getContext('2d');
+    cx.imageSmoothingEnabled = false;
+    return { canvas: c, ctx: cx };
   };
 
   // ============ FARMER SPRITE ============
@@ -283,12 +291,36 @@ html, body {
   }));
 
   // ============ SCENE DRAWERS ============
-  function drawSky(t) {
+  // Static (baked into bgLayer once at init).
+  function paintSkyBands(r) {
     const bands = [
       [0, 4, C.sky1], [4, 4, C.sky2], [8, 4, C.sky3],
       [12, 4, C.sky4], [16, 4, C.sky5], [20, 4, C.sky6],
     ];
-    for (const [y, h, c] of bands) rect(0, y, LOG_W, h, c);
+    for (const [y, h, c] of bands) r(0, y, LOG_W, h, c);
+  }
+
+  function paintMountains(r) {
+    for (let x = 0; x < LOG_W; x++) {
+      const h = 5 + Math.round(Math.sin(x * 0.09) * 2) + Math.round(Math.cos(x * 0.23) * 2);
+      r(x, 30 - h, 1, h, C.mtn1);
+    }
+    for (let x = 0; x < LOG_W; x++) {
+      const h = 3 + Math.round(Math.sin(x * 0.17 + 1.5) * 2);
+      r(x, 31 - h, 1, h, C.mtn2);
+    }
+    const pagX = 34, pagY = 24;
+    r(pagX + 2, pagY - 3, 2, 1, C.pagRoof);
+    r(pagX + 1, pagY - 2, 4, 1, C.pagRoof);
+    r(pagX,     pagY - 1, 6, 1, C.pagRoof);
+    r(pagX + 2, pagY,     2, 1, C.pagSide);
+    r(pagX + 1, pagY + 1, 4, 1, C.pagRoof);
+    r(pagX + 2, pagY + 2, 2, 2, C.pagSide);
+  }
+
+  // Dynamic sky (stars, sun, clouds, birds) — drawn per frame on top of bgLayer.
+  // Ordering preserved: stars first so the sun disc paints over them.
+  function drawSkyDynamic(t) {
     for (const s of stars) {
       const tw = (Math.sin(t / 450 + s.phase * TAU) + 1) / 2;
       if (tw > 0.55) rect(s.x, s.y, 1, 1, C.star);
@@ -319,24 +351,6 @@ html, body {
     drawBird(Math.floor(LOG_W + 15 - t1), 12);
     const t2 = ((t + 4000) / 55) % (LOG_W + 30);
     drawBird(Math.floor(LOG_W + 15 - t2), 9);
-  }
-
-  function drawMountains() {
-    for (let x = 0; x < LOG_W; x++) {
-      const h = 5 + Math.round(Math.sin(x * 0.09) * 2) + Math.round(Math.cos(x * 0.23) * 2);
-      rect(x, 30 - h, 1, h, C.mtn1);
-    }
-    for (let x = 0; x < LOG_W; x++) {
-      const h = 3 + Math.round(Math.sin(x * 0.17 + 1.5) * 2);
-      rect(x, 31 - h, 1, h, C.mtn2);
-    }
-    const pagX = 34, pagY = 24;
-    rect(pagX + 2, pagY - 3, 2, 1, C.pagRoof);
-    rect(pagX + 1, pagY - 2, 4, 1, C.pagRoof);
-    rect(pagX,     pagY - 1, 6, 1, C.pagRoof);
-    rect(pagX + 2, pagY,     2, 1, C.pagSide);
-    rect(pagX + 1, pagY + 1, 4, 1, C.pagRoof);
-    rect(pagX + 2, pagY + 2, 2, 2, C.pagSide);
   }
 
   function drawPaddies(t) {
@@ -379,11 +393,7 @@ html, body {
     const sway = Math.round(Math.sin(t / 720 + p.phase * 6.283) * 1);
     const px0 = p.lx - Math.floor(sprite.w / 2) + sway;
     const py0 = p.ly - sprite.h + 1;
-    for (const px of sprite.pixels) {
-      let color = px.color;
-      if (p.tone && color === C.pM) color = C.pL;
-      rect(px0 + px.dx, py0 + px.dy, 1, 1, color);
-    }
+    ctx.drawImage(plantAtlas[p.tone ? 1 : 0][stage], px0 * PX, py0 * PX);
   }
 
   // ============ FARMER ANIMATIONS (seamless loops) ============
@@ -421,18 +431,8 @@ html, body {
     if (f.state === 'waiting') drawGlowAura(f, t, C.sunDisc, 1400, 6);
     if (f.state === 'done')    drawGlowAura(f, t, C.gL,      1800, 8);
 
-    for (const pp of spritePixels) {
-      rect(x + xOff + pp.dx, y + pp.dy, 1, 1, pp.color);
-    }
-
-    if (f.state === 'idle') {
-      const bp = (t / 3800) % 1;
-      if (bp < 0.06) {
-        for (const pp of spritePixels) {
-          if (pp.color === C.eye) rect(x + xOff + pp.dx, y + pp.dy, 1, 1, C.creat);
-        }
-      }
-    }
+    const blink = f.state === 'idle' && ((t / 3800) % 1) < 0.06;
+    ctx.drawImage(blink ? spriteBlinkAtlas : spriteAtlas, (x + xOff) * PX, y * PX);
 
     if (f.state === 'planting')   drawPlantingFx(x, y, t);
     if (f.state === 'harvesting') drawHarvestingFx(x, y, t);
@@ -476,7 +476,7 @@ html, body {
       const sway = Math.round(Math.sin(t / 500 * TAU) * 1);
       const px0 = sproutX - Math.floor(sprite.w / 2) + sway;
       const py0 = sproutBaseY - sprite.h + 1;
-      for (const px of sprite.pixels) rect(px0 + px.dx, py0 + px.dy, 1, 1, px.color);
+      ctx.drawImage(plantAtlas[0][stage], px0 * PX, py0 * PX);
     }
   }
 
@@ -489,7 +489,7 @@ html, body {
     const sway = Math.round(Math.sin(t / 600 * TAU + 1.5) * 1);
     const px0 = plantX - Math.floor(sprite.w / 2) + sway;
     const py0 = plantBaseY - sprite.h + 1;
-    for (const px of sprite.pixels) rect(px0 + px.dx, py0 + px.dy, 1, 1, px.color);
+    ctx.drawImage(plantAtlas[0][2], px0 * PX, py0 * PX);
     const angle = Math.sin(p * TAU) * 1.1;
     const arcR = 6;
     const sX = x + SPRITE_W + Math.round(Math.cos(angle - Math.PI/2) * arcR);
@@ -616,15 +616,53 @@ html, body {
     }
   }
 
-  function drawForegroundEdge() {
-    rect(0, 98,  LOG_W, 4, C.bank);
-    rect(0, 102, LOG_W, 8, C.bankShadow);
+  function paintForegroundEdge(r) {
+    r(0, 98,  LOG_W, 4, C.bank);
+    r(0, 102, LOG_W, 8, C.bankShadow);
     for (let x = 0; x < LOG_W; x += 3) {
       const h = hash(x, 99);
-      if (h % 3 === 0) rect(x, 98, 1, 1, C.bankLit);
-      if (h % 5 === 0) rect(x + 1, 101, 1, 1, C.bankLit);
+      if (h % 3 === 0) r(x, 98, 1, 1, C.bankLit);
+      if (h % 5 === 0) r(x + 1, 101, 1, 1, C.bankLit);
     }
   }
+
+  // ============ PRERENDERED LAYERS ============
+  // Static scene geometry — baked once, blitted per frame instead of redrawn.
+  const bgLayer = makeLayer(W, H);
+  {
+    const r = makePainter(bgLayer.ctx);
+    paintSkyBands(r);
+    paintMountains(r);
+  }
+  const fgLayer = makeLayer(W, H);
+  paintForegroundEdge(makePainter(fgLayer.ctx));
+
+  // Sprite atlases — one normal, one with eyes recolored for the idle blink.
+  const spriteAtlas = (() => {
+    const layer = makeLayer(SPRITE_W * PX, SPRITE_H * PX);
+    const r = makePainter(layer.ctx);
+    for (const pp of spritePixels) r(pp.dx, pp.dy, 1, 1, pp.color);
+    return layer.canvas;
+  })();
+  const spriteBlinkAtlas = (() => {
+    const layer = makeLayer(SPRITE_W * PX, SPRITE_H * PX);
+    const r = makePainter(layer.ctx);
+    for (const pp of spritePixels) r(pp.dx, pp.dy, 1, 1, pp.color === C.eye ? C.creat : pp.color);
+    return layer.canvas;
+  })();
+
+  // Plant atlases: [tone][stage] — tone=1 swaps the base-green (pM) to highlight (pL).
+  const plantAtlas = [0, 1].map((tone) =>
+    PLANTS.map((sprite) => {
+      const layer = makeLayer(sprite.w * PX, sprite.h * PX);
+      const r = makePainter(layer.ctx);
+      for (const px of sprite.pixels) {
+        const color = (tone && px.color === C.pM) ? C.pL : px.color;
+        r(px.dx, px.dy, 1, 1, color);
+      }
+      return layer.canvas;
+    })
+  );
 
   // ============ EMPTY STATE CARD ============
   const emptyEl = document.createElement('div');
