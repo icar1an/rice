@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.0.4 — 2026-04-19
+
+- Perf: cache z-order between layouts; delegate mascot click handling
+- Perf: bake static sky/mountains/foreground into offscreen canvas layers
+- Perf: parallelize terminal PID lookups when resolving focus targets
+
 ## 0.0.3 — 2026-04-19
 
 - Updated icon to custom-authored mascot thumbnail
