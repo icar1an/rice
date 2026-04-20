@@ -2,7 +2,7 @@
   "name": "rice-field",
   "displayName": "Rice Field",
   "description": "Visualize your Claude Code sessions as pixel-art mascots working in a rice field.",
-  "version": "0.0.4",
+  "version": "0.0.6",
   "publisher": "UnseriousVentures",
   "license": "MIT",
   "icon": "media/icon.png",
@@ -56,13 +56,17 @@
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
     "vscode:prepublish": "npm run compile",
-    "package": "vsce package",
-    "publish": "vsce publish"
+    "package": "mkdir -p dist && vsce package --out dist/",
+    "publish": "bash release/publish.sh",
+    "publish:vsce": "bash release/publish.sh --vsce-only",
+    "publish:ovsx": "bash release/publish.sh --ovsx-only",
+    "publish:dry": "bash release/publish.sh --dry-run"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/vscode": "^1.85.0",
     "@vscode/vsce": "^3.9.1",
+    "ovsx": "^0.10.1",
     "typescript": "^5.3.0"
   }
 }

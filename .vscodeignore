@@ -4,9 +4,13 @@
 .github/**
 .gitignore
 *.vsix
+dist/**
 node_modules/**
 src/**
 tsconfig.json
 out/**/*.map
 memory/**
 .claude-code/**
+release/**
+.env
+.env.*

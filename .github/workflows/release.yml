@@ -1,5 +1,9 @@
 name: Release
 
+# Triggered by pushing a version tag like `v0.0.7`.
+# Runs the same publish flow as `npm run publish` locally, so local and CI
+# behavior can't drift — see release/publish.sh for the single source of truth.
+
 on:
   push:
     tags:
@@ -21,18 +25,14 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run compile
-
-      - name: Package VSIX
-        run: npx vsce package
-
-      - name: Publish to VS Code Marketplace
+      - name: Build + publish to both markets
         env:
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
-        run: npx vsce publish --packagePath rice-*.vsix
+          OVSX_PAT: ${{ secrets.OVSX_PAT }}
+        run: npm run publish
 
-      - name: Create GitHub Release
+      - name: Attach VSIX to GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: rice-*.vsix
+          files: dist/*.vsix
           generate_release_notes: true
