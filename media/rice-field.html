@@ -52,16 +52,6 @@ html, body {
   max-width: 220px;
   line-height: 1.2;
 }
-.rf-bubble.rf-waiting {
-  background: #fff2c8;
-  border-color: #8a6020;
-  box-shadow: 2px 2px 0 #8a6020;
-}
-.rf-bubble.rf-done {
-  background: #e8f8d8;
-  border-color: #2a5a2a;
-  box-shadow: 2px 2px 0 #2a5a2a;
-}
 .rf-bubble::after {
   content: '';
   position: absolute;
@@ -74,8 +64,6 @@ html, body {
   border-top: 7px solid currentColor;
   color: #2a1a0d;
 }
-.rf-bubble.rf-waiting::after { color: #8a6020; }
-.rf-bubble.rf-done::after    { color: #2a5a2a; }
 .rf-bubble::before {
   content: '';
   position: absolute;
@@ -88,8 +76,6 @@ html, body {
   border-top: 4px solid #fefbf0;
   z-index: 1;
 }
-.rf-bubble.rf-waiting::before { border-top-color: #fff2c8; }
-.rf-bubble.rf-done::before    { border-top-color: #e8f8d8; }
 .rf-hit {
   position: absolute;
   pointer-events: auto;
@@ -438,7 +424,6 @@ html, body {
     ctx.fillRect(x * PX, (baseY + SPRITE_H) * PX, SPRITE_W * PX, PX);
 
     if (f.state === 'waiting') drawGlowAura(f, t, C.sunDisc, 1400, 6);
-    if (f.state === 'done')    drawGlowAura(f, t, C.gL,      1800, 8);
 
     const blink = f.state === 'idle' && ((t / 3800) % 1) < 0.06;
     ctx.drawImage(blink ? spriteBlinkAtlas : spriteAtlas, (x + xOff) * PX, y * PX);
@@ -705,12 +690,12 @@ html, body {
         bubbleEls.set(f.id, b);
       }
       b.textContent = f.msg || '';
-      b.className = 'rf-bubble' + (f.state === 'waiting' ? ' rf-waiting' : (f.state === 'done' ? ' rf-done' : ''));
       const bx = (f.tileX + SPRITE_W / 2) * PX;
       const by = (f.tileY - 5) * PX;
       b.style.left = (bx / W) * 100 + '%';
       b.style.top  = (by / H) * 100 + '%';
-      b.style.display = f.msg ? '' : 'none';
+      const hasCanvasIndicator = f.state === 'done' || f.state === 'waiting';
+      b.style.display = (f.msg && !hasCanvasIndicator) ? '' : 'none';
 
       let h = hitEls.get(f.id);
       if (!h) {
@@ -767,6 +752,10 @@ html, body {
   let startTime = performance.now();
   function frame(now) {
     const t = now - startTime;
+    // bgLayer only has opaque pixels on sky bands + mountain silhouette; the
+    // rest is transparent. Without clearing first, drifting clouds/birds/stars
+    // and anything drawn in the gaps between paddies would persist across frames.
+    ctx.clearRect(0, 0, W, H);
     ctx.drawImage(bgLayer.canvas, 0, 0);
     drawSkyDynamic(t);
     drawPaddies(t);
