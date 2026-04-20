@@ -4,8 +4,6 @@ Visualize your Claude Code sessions as little mascots working in a pixel-art ric
 
 Every terminal running Claude Code becomes a farmer. The mascot's state mirrors what Claude is doing right now — thinking, editing files, running bash, searching the repo, waiting for your input — so you can glance at the panel and see the shape of the work across every session, across every project, at once.
 
-![Rice Field panel](media/rice-field.html)
-
 ## Why
 
 If you run several Claude Code sessions at the same time (one per project, or several per project), it's hard to keep track of which one is blocked on you, which one is churning, and which one just finished. Rice Field turns that state into a single ambient picture:
@@ -21,10 +19,38 @@ Click a mascot to jump to its terminal. If that terminal lives in another VS Cod
 
 ## Install
 
-1. Install the extension from the Marketplace.
-2. Run **Rice: Install Hooks** from the Command Palette. This writes `~/.claude/rice-hook.js` and wires it into `~/.claude/settings.json` so Claude Code will report session events.
-3. Run **Rice: Open Field** to open the panel.
-4. Start (or restart) a Claude Code session in any terminal — a mascot appears.
+### VS Code
+
+1. Search *Rice Field* in the Extensions panel, or install from the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=UnseriousVentures.rice-field).
+
+### Cursor (side-load)
+
+Rice Field is not on Cursor's built-in Open VSX registry yet (in flight — Eclipse Publisher Agreement pending). Until then, install the VSIX directly — it's the exact same artifact as the Marketplace listing.
+
+**Option A — one-liner in your terminal:**
+
+```bash
+curl -L --compressed -o rice-field.vsix \
+  "https://marketplace.visualstudio.com/_apis/public/gallery/publishers/UnseriousVentures/vsextensions/rice-field/0.0.6/vspackage"
+cursor --install-extension rice-field.vsix
+```
+
+(The `--compressed` flag is required — the Marketplace serves the package gzipped.)
+
+**Option B — GUI:**
+
+1. Open the [VS Code Marketplace page](https://marketplace.visualstudio.com/items?itemName=UnseriousVentures.rice-field).
+2. In the right sidebar under **Resources**, click **Download Extension**.
+3. In Cursor: open the Extensions panel → click the `…` menu at the top → **Install from VSIX…** → select the downloaded file.
+   - Or drag the `.vsix` directly onto the Cursor window.
+
+Once Cursor is running the extension, continue with **Post-install** below. VSCodium and Windsurf users can follow the same side-load steps.
+
+### Post-install (all editors)
+
+1. Run **Rice: Install Hooks** from the Command Palette. This writes `~/.claude/rice-hook.js` and wires it into `~/.claude/settings.json` so Claude Code will report session events.
+2. Run **Rice: Open Field** to open the panel.
+3. Start (or restart) a Claude Code session in any terminal — a mascot appears.
 
 To remove the hooks later, run **Rice: Uninstall Hooks**. It only strips Rice Field's own entries and leaves everything else in `settings.json` intact.
 
@@ -49,7 +75,7 @@ No network calls. No telemetry. State is local to `~/.claude/rice-state/` and is
 
 ## Requirements
 
-- VS Code `1.85` or newer
+- VS Code `1.85` or newer — or any fork that speaks the same extension API (Cursor, VSCodium, Windsurf)
 - [Claude Code](https://claude.ai/claude-code) installed and runnable as `claude`
 - macOS, Linux, or Windows. Cross-window raise behavior is macOS-only; clicking a mascot in a non-owning window still surfaces a helpful message on other platforms.
 
