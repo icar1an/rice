@@ -287,12 +287,24 @@ html, body {
 
   // ============ SCENE DRAWERS ============
   // Static (baked into bgLayer once at init).
+
+  // Sparse 25%-density seam row — every 4th pixel flipped to bColor. y-parity
+  // phase-shifts the start column so adjacent seams don't line up vertically.
+  function ditherRow(r, y, aColor, bColor) {
+    r(0, y, LOG_W, 1, aColor);
+    const start = y & 3;
+    for (let x = start; x < LOG_W; x += 4) r(x, y, 1, 1, bColor);
+  }
+
   function paintSkyBands(r) {
-    const bands = [
-      [0, 4, C.sky1], [4, 4, C.sky2], [8, 4, C.sky3],
-      [12, 4, C.sky4], [16, 4, C.sky5], [20, 4, C.sky6],
-    ];
-    for (const [y, h, c] of bands) r(0, y, LOG_W, h, c);
+    const bands = [C.sky1, C.sky2, C.sky3, C.sky4, C.sky5, C.sky6];
+    const bandH = 4;
+    for (let i = 0; i < bands.length; i++) {
+      const y = i * bandH;
+      const isLast = i === bands.length - 1;
+      r(0, y, LOG_W, isLast ? bandH : bandH - 1, bands[i]);
+      if (!isLast) ditherRow(r, y + bandH - 1, bands[i], bands[i + 1]);
+    }
   }
 
   function paintMountains(r) {
@@ -348,15 +360,22 @@ html, body {
     drawBird(Math.floor(LOG_W + 15 - t2), 9);
   }
 
-  function drawPaddies(t) {
-    for (let pi = 0; pi < PADDIES.length; pi++) {
-      const p = PADDIES[pi];
-      rect(0, p.y,         LOG_W, 1,         C.water2);
-      rect(0, p.y + 1,     LOG_W, p.h - 2,   C.water1);
-      rect(0, p.y + p.h-1, LOG_W, 1,         C.water3);
-      rect(0, p.y - 2, LOG_W, 1, C.bankShadow);
-      rect(0, p.y - 1, LOG_W, 1, C.bank);
-      const period = 2400;
+  // Static paddy surfaces — banks above the water, lit/mid/deep water rows.
+  // Baked into bgLayer (see init block below).
+  function paintPaddies(r) {
+    for (const p of PADDIES) {
+      r(0, p.y - 2,       LOG_W, 1,       C.bankShadow);
+      r(0, p.y - 1,       LOG_W, 1,       C.bank);
+      r(0, p.y,           LOG_W, 1,       C.water2);
+      r(0, p.y + 1,       LOG_W, p.h - 2, C.water1);
+      r(0, p.y + p.h - 1, LOG_W, 1,       C.water3);
+    }
+  }
+
+  // Animated shimmer — sparse waterShine dashes pulsing on a 2400ms cycle.
+  function drawWaterShimmer(t) {
+    const period = 2400;
+    for (const p of PADDIES) {
       for (let x = 2; x < LOG_W - 2; x += 4) {
         const seed = hash(x, p.y);
         const phase = (seed % 1000) / 1000;
@@ -627,6 +646,7 @@ html, body {
     const r = makePainter(bgLayer.ctx);
     paintSkyBands(r);
     paintMountains(r);
+    paintPaddies(r);
   }
   const fgLayer = makeLayer(W, H);
   paintForegroundEdge(makePainter(fgLayer.ctx));
@@ -752,13 +772,15 @@ html, body {
   let startTime = performance.now();
   function frame(now) {
     const t = now - startTime;
-    // bgLayer only has opaque pixels on sky bands + mountain silhouette; the
-    // rest is transparent. Without clearing first, drifting clouds/birds/stars
-    // and anything drawn in the gaps between paddies would persist across frames.
+    // bgLayer has opaque pixels for sky bands, mountain silhouette, and the
+    // static paddy water + banks. Mountain cutouts and the gaps between
+    // paddies stay transparent. Without clearRect first, drifting clouds/
+    // birds/stars and farmer reflections on transparent rows would persist
+    // across frames.
     ctx.clearRect(0, 0, W, H);
     ctx.drawImage(bgLayer.canvas, 0, 0);
     drawSkyDynamic(t);
-    drawPaddies(t);
+    drawWaterShimmer(t);
     for (const f of farmers) drawReflection(f);
     for (const o of zOrder) {
       if (o.kind === 'plant') drawPlant(o.ref, t);
