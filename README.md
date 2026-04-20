@@ -2,6 +2,8 @@
 
 Visualize your Claude Code sessions as little mascots working in a pixel-art rice field inside VS Code.
 
+![Rice Field preview — pixel-art mascots working in a field inside VS Code](https://raw.githubusercontent.com/icar1an/rice/main/media/rice-field-preview.png)
+
 Every terminal running Claude Code becomes a farmer. The mascot's state mirrors what Claude is doing right now — thinking, editing files, running bash, searching the repo, waiting for your input — so you can glance at the panel and see the shape of the work across every session, across every project, at once.
 
 ## Why
