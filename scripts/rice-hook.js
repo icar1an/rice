@@ -36,6 +36,7 @@ function run() {
   const outDir = path.join(os.homedir(), '.claude', 'rice-state');
   fs.mkdirSync(outDir, { recursive: true });
 
+  const ancestorPids = getAncestorPids(process.pid, 6);
   const outFile = path.join(outDir, sessionId + '.json');
   const record = {
     sessionId,
@@ -44,10 +45,37 @@ function run() {
     cwd,
     toolName: toolName || null,
     event,
-    ancestorPids: getAncestorPids(process.pid, 6),
+    ancestorPids,
     ts: Date.now(),
   };
   fs.writeFileSync(outFile, JSON.stringify(record, null, 2));
+
+  // Any event is a fresh heartbeat for this session. Any *other* state file
+  // whose claude-CLI PID (ancestorPids[0]) matches ours is a superseded
+  // session — e.g. the one the user just /clear'd or /compact'd. Prune it
+  // so a stale mascot doesn't linger until STALE_MS expires.
+  pruneSupersededSessions(outDir, sessionId, ancestorPids[0]);
+}
+
+function pruneSupersededSessions(stateDir, currentSessionId, currentClaudePid) {
+  if (typeof currentClaudePid !== 'number') return;
+  let entries;
+  try { entries = fs.readdirSync(stateDir); } catch { return; }
+  for (const name of entries) {
+    if (!name.endsWith('.json') || name.startsWith('focus-')) continue;
+    const otherSessionId = name.slice(0, -'.json'.length);
+    if (otherSessionId === currentSessionId) continue;
+    const full = path.join(stateDir, name);
+    try {
+      const data = JSON.parse(fs.readFileSync(full, 'utf8'));
+      const otherClaudePid = Array.isArray(data.ancestorPids) ? data.ancestorPids[0] : null;
+      if (otherClaudePid === currentClaudePid) {
+        try { fs.unlinkSync(full); } catch {}
+      }
+    } catch {
+      // Partial write or bad JSON — leave it; the watcher's sweep will handle it.
+    }
+  }
 }
 
 function getAncestorPids(startPid, depth) {

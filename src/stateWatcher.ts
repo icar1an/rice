@@ -171,7 +171,7 @@ export class StateWatcher {
         ? data.ancestorPids.filter((n: unknown): n is number => typeof n === 'number' && Number.isFinite(n))
         : undefined;
 
-      if (ancestorPids && ancestorPids.length > 0 && !isAnyAlive(ancestorPids)) {
+      if (ancestorPids && ancestorPids.length > 0 && !isSessionAlive(ancestorPids)) {
         fsp.unlink(filePath).catch(() => {});
         if (this.farmers.delete(id)) this.schedule();
         return;
@@ -187,10 +187,27 @@ export class StateWatcher {
         ts: typeof data.ts === 'number' ? data.ts : Date.now(),
       };
       this.farmers.set(id, farmer);
+      this.evictSupersededBy(farmer);
     } catch {
       // Ignore; partial write or bad JSON
     }
     this.schedule();
+  }
+
+  // Two farmers that share the same claude CLI PID (ancestorPids[0]) must be
+  // the same terminal. Only the newest session_id is current; anything older
+  // is a leftover from /clear or /compact. Evict the older one and unlink its
+  // file so the webview reflects reality immediately.
+  private evictSupersededBy(current: Farmer): void {
+    const currentPid = current.ancestorPids?.[0];
+    if (typeof currentPid !== 'number') return;
+    for (const [otherId, other] of this.farmers) {
+      if (otherId === current.id) continue;
+      if (other.ancestorPids?.[0] !== currentPid) continue;
+      if (other.ts >= current.ts) continue;
+      this.farmers.delete(otherId);
+      fsp.unlink(path.join(this.stateDir, otherId + '.json')).catch(() => {});
+    }
   }
 
   private schedule(): void {
@@ -203,7 +220,7 @@ export class StateWatcher {
     let changed = false;
     for (const [id, f] of this.farmers) {
       const stale = now - f.ts > STALE_MS;
-      const dead = !!f.ancestorPids && f.ancestorPids.length > 0 && !isAnyAlive(f.ancestorPids);
+      const dead = !!f.ancestorPids && f.ancestorPids.length > 0 && !isSessionAlive(f.ancestorPids);
       if (stale || dead) {
         this.farmers.delete(id);
         if (dead) {
@@ -216,16 +233,19 @@ export class StateWatcher {
   }
 }
 
-function isAnyAlive(pids: number[]): boolean {
-  for (const pid of pids) {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      // ESRCH (no such process) or EPERM — treat as not-ours/dead
-    }
+// ancestorPids[0] is the hook's immediate parent: the `claude` CLI process.
+// When the terminal closes, SIGHUP kills the shell and claude with it; when
+// claude exits via /exit, the PID dies too. Deeper ancestors (pty-host, the
+// VS Code app) outlive the session and must not gate liveness.
+function isSessionAlive(pids: number[]): boolean {
+  const claudePid = pids[0];
+  if (typeof claudePid !== 'number') return false;
+  try {
+    process.kill(claudePid, 0);
+    return true;
+  } catch {
+    return false;
   }
-  return false;
 }
 
 function shortName(id: string): string {
